@@ -2,6 +2,7 @@ import React, { useState, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Icon, AppShell } from '../components/UI';
 import { AppContext } from '../context/AppContext';
+import { supabase } from '../src/supabaseClient';
 
 const LoginScreen = () => {
     const navigate = useNavigate();
@@ -10,22 +11,45 @@ const LoginScreen = () => {
 
     const [isRegistering, setIsRegistering] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
     
     // Form States
     const [name, setName] = useState("");
     const [email, setEmail] = useState("julian.reynolds@steady.com");
     const [password, setPassword] = useState("");
 
-    const handleAuth = () => {
+    const handleAuth = async () => {
         setLoading(true);
-        // Simulate API delay for premium feel
-        setTimeout(() => {
-            if (isRegistering && name) {
-                setUsername(name);
+        setErrorMessage('');
+
+        try {
+            if (isRegistering) {
+                const { data, error } = await supabase.auth.signUp({ 
+                    email, 
+                    password, 
+                    options: { data: { name } }, 
+                    redirectTo: 'http://localhost:5173/' 
+                });
+                if (error) throw error;
+                if (data.user) {
+                    setUsername(data.user.user_metadata.name || data.user.email);
+                    navigate('/dashboard');
+                } else {
+                    setErrorMessage('Registration successful, please check your email to confirm.');
+                }
+            } else {
+                const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+                if (error) throw error;
+                if (data.user) {
+                    setUsername(data.user.user_metadata.name || data.user.email);
+                    navigate('/dashboard');
+                }
             }
+        } catch (error: any) {
+            setErrorMessage(error.message);
+        } finally {
             setLoading(false);
-            navigate('/dashboard');
-        }, 1200);
+        }
     };
 
     return (
@@ -109,6 +133,10 @@ const LoginScreen = () => {
                             onChange={(e) => setPassword(e.target.value)}
                         />
                     </div>
+
+                    {errorMessage && (
+                        <p className="text-red-500 text-sm text-center mt-4">{errorMessage}</p>
+                    )}
 
                     {/* Flat, Clean Modern Button */}
                     <button 

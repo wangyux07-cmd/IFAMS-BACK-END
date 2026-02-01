@@ -9,6 +9,7 @@ import BookkeepingScreen from './screens/BookkeepingScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import AddHubScreen from './screens/AddHubScreen';
 import AssetListScreen from './screens/AssetListScreen'; // Imported
+import ProtectedScreen from './screens/ProtectedScreen'; // Import ProtectedScreen
 import { 
     HealthScreen, 
     AIConciergeScreen, 
@@ -31,6 +32,7 @@ const App = () => {
                     <Route path="/ai-concierge" element={<AIConciergeScreen />} />
                     <Route path="/health" element={<HealthScreen />} />
                     <Route path="/settings" element={<SettingsScreen />} />
+                    <Route path="/protected" element={<ProtectedScreen />} /> {/* Add Protected Route */}
                     
                     {/* Asset Detail List */}
                     <Route path="/asset-detail/:category" element={<AssetListScreen />} />
