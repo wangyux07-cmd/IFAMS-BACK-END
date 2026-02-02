@@ -889,7 +889,6 @@ export const AIConciergeScreen = () => {
     const chatSession = useRef<Chat | null>(null);
 
     useEffect(() => {
-        console.log("Vite环境变量:", import.meta.env); // 打印 import.meta.env 的完整内容
         const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY; // 确保在 useEffect 内部获取最新值
 
         // 添加条件：如果 chatSession 未初始化，或 geminiApiKey 改变，则重新初始化
@@ -899,9 +898,8 @@ export const AIConciergeScreen = () => {
                 alert("错误：Gemini API Key 未设置。请检查您的 .env.local 文件并确保已重启开发服务器。"); // 添加 alert 提示
                 return;
             }
-            console.log("初始化GoogleGenerativeAI时的Key:", geminiApiKey); 
             const ai = new GoogleGenerativeAI({ apiKey: geminiApiKey });
-            const model = ai.getGenerativeModel({ model: 'gemini-3-flash-preview' });
+            const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
             chatSession.current = model.startChat({
                 config: {
                     systemInstruction: "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to general financial knowledge. Be concise, professional, and helpful.",
