@@ -387,11 +387,29 @@ export const SimpleForm = ({ title, assetKey }: { title: string; assetKey?: keyo
     );
 };
 
-export const AnalysisTemplate = ({ title, score, metricValue, description, formula, formulaExplanation, insights, drivers }: {
-    title: string; score: number; metricValue: string; description: string; formula: string; formulaExplanation: string; insights: string[]; drivers: { label: string; value: string; trend: string }[];
+export const AnalysisTemplate = ({ 
+    title, 
+    type,
+    score,
+    metricValue,
+    description,
+    drivers,
+    insights,
+    formula,
+    formulaExplanation
+}: {
+    title: string; 
+    type: 'solvency' | 'liquidity' | 'incomeStability' | 'growth' | 'riskResilience';
+    score: number;
+    metricValue: string;
+    description: string;
+    drivers: { label: string; value: string; trend: 'up' | 'down' | 'neutral' }[];
+    insights: string[];
+    formula: string;
+    formulaExplanation: string;
 }) => {
-    // Analysis Template implementation remains largely same but ensures imports/layout consistency
     const navigate = useNavigate();
+    
     const getColor = (s: number) => {
         if (s >= 80) return { text: 'text-brand-emerald', bg: 'bg-brand-emerald', border: 'border-brand-emerald', glow: 'shadow-[0_0_20px_rgba(16,185,129,0.3)]' };
         if (s >= 60) return { text: 'text-accent-gold', bg: 'bg-accent-gold', border: 'border-accent-gold', glow: 'shadow-[0_0_20px_rgba(212,175,55,0.3)]' };

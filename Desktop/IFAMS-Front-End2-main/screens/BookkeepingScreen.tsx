@@ -9,7 +9,7 @@ const BookkeepingScreen = () => {
     const context = useContext(AppContext);
     
     if (!context) return null;
-    const { activities } = context;
+    const { activities, deleteActivity } = context;
 
     const filterActivitiesByTimeframe = (acts: Activity[], tf: string): Activity[] => {
         const now = new Date();
@@ -137,8 +137,12 @@ const BookkeepingScreen = () => {
     }, [currentListTotal]);
 
     const spendingPath = useMemo(() => {
+        const width = 500; // From getChartDataPoints call
+        const height = 150; // From getChartDataPoints call
+
         if (chartDataPoints.length < 2) {
-            return ""; 
+            // If no data points or only one, draw a straight line at the bottom
+            return `M 0,${height} L ${width},${height}`;
         }
 
         const tension = 0.5; // 控制曲线的“紧绷”程度，0到1之间
@@ -306,7 +310,7 @@ const BookkeepingScreen = () => {
                                             -${act.amount}
                                         </p>
                                         <button 
-                                            onClick={(e) => { e.stopPropagation(); deleteActivity(act.id); }} 
+                                            onClick={(e) => { e.stopPropagation(); if(deleteActivity) deleteActivity(act.id); }} 
                                             className="size-6 rounded-full bg-white/5 flex items-center justify-center text-gray-700 hover:bg-rose-500 hover:text-white transition-all"
                                             aria-label="Delete activity"
                                         >

@@ -225,6 +225,11 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
 
     // Dynamic AI Score based on Solvency Ratio and Net Worth
     const financialScore = useMemo(() => {
+        // 如果没有资产项目且总净资产为0，则认为没有数据可供计算
+        if (assetItems.length === 0 && totalNetWorth === 0) {
+            return 0; // 或者返回一个表示“无数据”的特殊值，这里暂时用0
+        }
+
         const ratio = (totalNetWorth + assets.liabilities) / (assets.liabilities || 1);
         let score = 75; 
         if (ratio > 5) score += 10;
@@ -234,7 +239,173 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         if (liquidity > 1000000) score += 3;
         if (activities.length > 10) score -= 2;
         return Math.min(99, Math.max(1, score));
-    }, [totalNetWorth, assets, activities]);
+    }, [totalNetWorth, assets, activities, assetItems]); // 添加 assetItems 到依赖数组
+
+    const solvencyAnalysis = useMemo<AnalysisData>(() => {
+        if (assetItems.length === 0) {
+            return {
+                score: 0,
+                metricValue: "N/A",
+                description: "No asset data available.",
+                drivers: [],
+                insights: ["Please add assets to get a solvency analysis."],
+                formula: "Total Equity / Total Assets",
+                formulaExplanation: "Measures the proportion of assets financed by equity. A higher percentage indicates stronger solvency."
+            };
+        }
+        const totalAssets = totalNetWorth + assets.liabilities;
+        const equityPercentage = (totalNetWorth / (totalAssets || 1)) * 100;
+        let score = 0;
+
+        if (equityPercentage < 0) { // Negative equity means insolvency
+            score = 0;
+        } else if (equityPercentage >= 50) { // 50% equity is generally very strong
+            score = 100;
+        } else { // Scale linearly from 0% to 50% equity
+            score = (equityPercentage / 50) * 100;
+        }
+        
+        return {
+            score: Math.min(100, Math.round(score)), // Cap score at 100
+            metricValue: `${equityPercentage.toFixed(1)}%`,
+            description: "The percentage of your assets financed by equity.",
+            drivers: [
+                { label: 'Net Worth', value: `$${(totalNetWorth/1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Total Assets', value: `$${(totalAssets/1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Debt Ratio', value: `${((assets.liabilities / (totalAssets || 1)) * 100).toFixed(0)}%`, trend: 'down' },
+            ],
+            insights: [
+                "A higher equity percentage indicates stronger financial stability and lower reliance on debt.",
+                "Review your debt levels if your equity percentage is consistently low."
+            ],
+            formula: "Total Equity / Total Assets",
+            formulaExplanation: "This ratio indicates the proportion of total assets that are financed by shareholders' equity. A higher percentage suggests better long-term solvency."
+        };
+    }, [assetItems, totalNetWorth, assets]);
+
+    const liquidityAnalysis = useMemo<AnalysisData>(() => {
+        if (assetItems.length === 0) {
+            return {
+                score: 0,
+                metricValue: "N/A",
+                description: "No asset data available.",
+                drivers: [],
+                insights: ["Please add assets to get a liquidity analysis."],
+                formula: "(Liquid Assets / Total Net Worth)",
+                formulaExplanation: "Measures how quickly you can convert assets to cash without significant loss of value."
+            };
+        }
+        const liquidAssets = assets.cash + assets.fx;
+        let percentage = 0;
+        let score = 0;
+
+        if (totalNetWorth > 0) {
+            percentage = (liquidAssets / totalNetWorth) * 100;
+            // Score 100 if 25% of net worth is liquid
+            score = Math.min(100, percentage * 4);
+        } else {
+            // If net worth is zero or negative, any liquid assets are good.
+            if (liquidAssets > 0) {
+                score = 100;
+                percentage = 100; // Represent as 100% for display
+            } else {
+                score = 0;
+                percentage = 0;
+            }
+        }
+
+        return {
+            score: Math.round(score),
+            metricValue: totalNetWorth > 0 ? `${percentage.toFixed(1)}%` : (liquidAssets > 0 ? "High" : "None"),
+            description: "The percentage of your net worth that is readily available as cash or cash equivalents.",
+            drivers: [
+                { label: 'Cash', value: `$${(assets.cash/1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Equities', value: `$${(assets.equities/1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Fixed Income', value: `$${(assets.fixedIncome/1000).toFixed(0)}k`, trend: 'neutral' },
+            ],
+            insights: [
+                "Your current liquidity is adequate for emergencies.",
+                "To enhance liquidity, consider moving some less-liquid assets into a high-yield savings account."
+            ],
+            formula: "(Liquid Assets / Total Net Worth)",
+            formulaExplanation: "Measures how quickly you can convert assets to cash without significant loss of value."
+        };
+    }, [assetItems, totalNetWorth, assets]);
+
+    const incomeStabilityAnalysis = useMemo<AnalysisData>(() => ({
+        score: 0,
+        metricValue: "N/A",
+        description: "Analysis of your recurring income sources versus your expenses.",
+        drivers: [],
+        insights: ["Income stability data is not yet available.", "Connect your income and expense accounts for a full analysis."],
+        formula: "(Recurring Income / Monthly Expenses)",
+        formulaExplanation: "This ratio shows your ability to cover expenses with your regular income."
+    }), []);
+
+    const growthAnalysis = useMemo<AnalysisData>(() => ({
+        score: 0,
+        metricValue: "+$0.00k",
+        description: "The growth of your net worth over the selected period.",
+        drivers: [],
+        insights: ["Historical growth data is not yet available.", "Consistent investment and saving are key drivers for long-term growth."],
+        formula: "(End NW - Start NW) / Start NW",
+        formulaExplanation: "Calculates the percentage change in your net worth over a period."
+    }), []);
+
+    const riskResilienceAnalysis = useMemo<AnalysisData>(() => {
+        if (assetItems.length === 0) {
+            return {
+                score: 0,
+                metricValue: "N/A",
+                description: "No asset data available.",
+                drivers: [],
+                insights: ["Please add assets to get a risk analysis."],
+                formula: "(Equities / Net Worth %)",
+                formulaExplanation: "A simplified risk score based on equity exposure. Higher equity allocation leads to higher risk and a higher score."
+            };
+        }
+        
+        let score = 0;
+        let equitiesPercentage = 0;
+
+        if (totalNetWorth > 0) {
+            equitiesPercentage = (assets.equities / totalNetWorth) * 100;
+            score = equitiesPercentage;
+        } else {
+            // If net worth is zero or negative, any equity exposure is high risk
+            if (assets.equities > 0) {
+                score = 100; // Max risk score
+            } else {
+                score = 0; // No equity exposure, so no risk from this metric
+            }
+        }
+
+        const getMetricValue = (s: number) => {
+            if (s > 80) return "Very High";
+            if (s > 60) return "High";
+            if (s > 40) return "Medium";
+            if (s > 20) return "Low";
+            return "Very Low";
+        }
+
+        return {
+            score: Math.min(100, Math.round(score)),
+            metricValue: getMetricValue(score),
+            description: "Your portfolio's ability to withstand market volatility and downturns.",
+            drivers: [
+                { label: 'Equities %', value: `${equitiesPercentage.toFixed(0)}%`, trend: 'neutral' },
+                { label: 'Insurance', value: `$${(assets.insurance/1000).toFixed(0)}k`, trend: 'neutral' },
+                { label: 'Diversification', value: 'N/A', trend: 'neutral' },
+            ],
+            insights: [
+                "This score primarily reflects risk from equity exposure.",
+                "A lower score suggests lower volatility, while a higher score suggests higher potential returns but also higher risk."
+            ],
+            formula: "(Equities / Net Worth %)",
+            formulaExplanation: "A simplified risk score based on equity exposure. Higher equity allocation leads to higher risk and a higher score."
+        };
+    }, [assetItems, totalNetWorth, assets]);
+
 
     // Supabase CRUD Operations for Activities
     const addActivity = async (activity: Omit<Activity, 'id' | 'user_id' | 'time'>, source_asset_id?: number, expenseCurrency: string = 'USD') => {
@@ -393,7 +564,12 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
             deleteAssetItem,
             totalNetWorth, 
             financialScore, 
-            growthMetrics 
+            growthMetrics,
+            solvencyAnalysis,
+            liquidityAnalysis,
+            incomeStabilityAnalysis,
+            growthAnalysis,
+            riskResilienceAnalysis
         }}>
             {children}
         </AppContext.Provider>
