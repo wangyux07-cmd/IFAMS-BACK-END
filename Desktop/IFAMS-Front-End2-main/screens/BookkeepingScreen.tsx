@@ -11,45 +11,161 @@ const BookkeepingScreen = () => {
     if (!context) return null;
     const { activities } = context;
 
-    const currentListTotal = activities.reduce((acc, curr) => acc + parseFloat(curr.amount || '0'), 0);
+    const filterActivitiesByTimeframe = (acts: Activity[], tf: string): Activity[] => {
+        const now = new Date();
+        const oneDay = 24 * 60 * 60 * 1000;
+        const oneWeek = 7 * oneDay;
+        const oneMonth = 30 * oneDay; // 近似值
+        const oneYear = 365 * oneDay; // 近似值
 
-    const totalSpending = useMemo(() => {
-        switch(timeframe) {
-            case '1d': return currentListTotal;
-            case '1w': return currentListTotal * 4.5 + 120;
-            case '1m': return currentListTotal * 18 + 450;
-            case '1y': return currentListTotal * 150 + 2000;
-            case 'all': return currentListTotal * 300 + 5000;
-            default: return currentListTotal;
+        return acts.filter(activity => {
+            const activityTime = new Date(activity.time);
+            const diff = now.getTime() - activityTime.getTime(); // 距离现在的毫秒数
+
+            switch (tf) {
+                case '1d': return diff <= oneDay;
+                case '1w': return diff <= oneWeek;
+                case '1m': return diff <= oneMonth;
+                case '1y': return diff <= oneYear;
+                case 'all': return true;
+                default: return true;
+            }
+        });
+    };
+
+    const filteredActivities = useMemo(() => filterActivitiesByTimeframe(activities, timeframe), [activities, timeframe]);
+
+    const currentListTotal = filteredActivities.reduce((acc, curr) => acc + parseFloat(curr.amount || '0'), 0);
+
+    // Helper to get time boundaries based on timeframe
+    const getTimeBoundaries = (tf: string, acts: Activity[]) => { // acts needed for 'all' case
+        const now = new Date();
+        let start = new Date(now);
+        let end = new Date(now);
+
+        switch (tf) {
+            case '1d': 
+                start.setHours(0, 0, 0, 0); 
+                end.setHours(23, 59, 59, 999);
+                return { start, end, interval: 'hour' };
+            case '1w': 
+                start.setDate(now.getDate() - 6); // Last 7 days
+                start.setHours(0, 0, 0, 0);
+                end.setHours(23, 59, 59, 999);
+                return { start, end, interval: 'day' };
+            case '1m': 
+                start.setDate(now.getDate() - 29); // Last 30 days
+                start.setHours(0, 0, 0, 0);
+                end.setHours(23, 59, 59, 999);
+                return { start, end, interval: 'day' };
+            case '1y': 
+                start.setFullYear(now.getFullYear() - 1);
+                start.setMonth(now.getMonth() + 1); // Start of last year to current month
+                start.setDate(1);
+                start.setHours(0, 0, 0, 0);
+                end.setHours(23, 59, 59, 999);
+                return { start, end, interval: 'month' };
+            case 'all': 
+                const minTime = acts.length > 0 
+                    ? new Date(Math.min(...acts.map(a => new Date(a.time).getTime()))) 
+                    : new Date(now.getFullYear() - 5, 0, 1); // 5 years back if no activities
+                start = minTime;
+                end = now;
+                return { start, end, interval: 'month' }; // Aggregate by month for 'all'
+            default: 
+                return { start: now, end: now, interval: 'hour' };
         }
-    }, [timeframe, currentListTotal]);
+    };
 
-    const spendingPath = useMemo(() => {
-        const points = 25; 
-        const width = 500;
-        const height = 150;
-        const seed = timeframe.length * 100 + (timeframe === '1m' ? 50 : 0); 
-        
-        const coords = Array.from({ length: points }, (_, i) => {
-            const x = (i / (points - 1)) * width;
-            const wave1 = Math.sin(i * 0.4 + seed) * 25;
-            const wave2 = Math.cos(i * 0.7) * 15;
-            const y = (height / 2) - (wave1 + wave2); 
-            return `${x},${y}`;
+    // Main function to aggregate activities for chart
+    const getChartDataPoints = (acts: Activity[], tf: string, width: number, height: number) => {
+        if (acts.length === 0) return [];
+
+        const { start, end, interval } = getTimeBoundaries(tf, acts); // Pass acts here
+        const timeRangeMs = end.getTime() - start.getTime();
+
+        // Aggregate spending by interval
+        const aggregatedData: { [key: number]: number } = {};
+        acts.forEach(activity => {
+            const activityDate = new Date(activity.time);
+            let key: number; // Timestamp representing the start of the interval
+
+            if (interval === 'hour') {
+                key = activityDate.setMinutes(0, 0, 0);
+            } else if (interval === 'day') {
+                key = activityDate.setHours(0, 0, 0, 0);
+            } else if (interval === 'month') {
+                key = new Date(activityDate.getFullYear(), activityDate.getMonth(), 1).getTime();
+            } else {
+                 key = activityDate.getTime(); // Fallback to exact timestamp
+            }
+            
+            if (key >= start.getTime() && key <= end.getTime()) {
+                aggregatedData[key] = (aggregatedData[key] || 0) + parseFloat(activity.amount || '0');
+            }
         });
 
-        let d = `M ${coords[0]}`;
-        for (let i = 1; i < coords.length; i++) {
-            const [x0, y0] = coords[i - 1].split(',').map(Number);
-            const [x1, y1] = coords[i].split(',').map(Number);
-            const cp1x = x0 + (x1 - x0) * 0.5;
-            const cp1y = y0;
-            const cp2x = x1 - (x1 - x0) * 0.5;
-            const cp2y = y1;
-            d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${x1},${y1}`;
+        // Sort by time and map to SVG coordinates
+        const sortedKeys = Object.keys(aggregatedData).map(Number).sort((a, b) => a - b);
+        if (sortedKeys.length === 0) return [];
+
+        const maxSpending = Math.max(...Object.values(aggregatedData));
+        const minTime = sortedKeys[0];
+        const maxTime = sortedKeys[sortedKeys.length - 1];
+        
+        // Add start and end points for context, even if no spending there
+        let dataPoints: {x: number, y: number}[] = [];
+        // Ensure starting point is aligned with the timeframe's start
+        dataPoints.push({x: 0, y: height}); 
+
+        sortedKeys.forEach(time => {
+            const x = (time - start.getTime()) / (timeRangeMs || 1) * width; // Normalize X to SVG width based on full time range
+            const y = height - (aggregatedData[time] / (maxSpending || 1)) * (height - 20) - 10; // Normalize Y to SVG height (inverted for SVG), with padding
+            dataPoints.push({x, y});
+        });
+
+        // Ensure ending point is aligned with the timeframe's end
+        dataPoints.push({x: width, y: height}); 
+
+        return dataPoints;
+    };
+
+    const chartDataPoints = useMemo(() => getChartDataPoints(filteredActivities, timeframe, 500, 150), [filteredActivities, timeframe]); // Pass width/height
+    
+    const totalSpending = useMemo(() => {
+        return currentListTotal; // 直接使用筛选后的总金额
+    }, [currentListTotal]);
+
+    const spendingPath = useMemo(() => {
+        if (chartDataPoints.length < 2) {
+            return ""; 
+        }
+
+        const tension = 0.5; // 控制曲线的“紧绷”程度，0到1之间
+
+        let d = `M ${chartDataPoints[0].x},${chartDataPoints[0].y}`;
+
+        for (let i = 0; i < chartDataPoints.length - 1; i++) {
+            const p0 = chartDataPoints[i];
+            const p1 = chartDataPoints[i + 1];
+
+            // Consider previous and next points for smoother transitions
+            const prevPoint = i > 0 ? chartDataPoints[i - 1] : p0;
+            const nextPoint = i < chartDataPoints.length - 2 ? chartDataPoints[i + 2] : p1;
+
+            // Calculate control points for a smooth Bezier curve
+            // cp1: control point for current point p0
+            const cp1x = p0.x + (p1.x - prevPoint.x) * tension;
+            const cp1y = p0.y + (p1.y - prevPoint.y) * tension;
+
+            // cp2: control point for next point p1
+            const cp2x = p1.x - (nextPoint.x - p0.x) * tension;
+            const cp2y = p1.y - (nextPoint.y - p0.y) * tension;
+
+            d += ` C ${cp1x},${cp1y} ${cp2x},${cp2y} ${p1.x},${p1.y}`;
         }
         return d;
-    }, [timeframe]);
+    }, [chartDataPoints]);
 
     return (
         <AppShell>
@@ -162,38 +278,44 @@ const BookkeepingScreen = () => {
 
                     {/* Scrollable List */}
                     <div className="flex-1 overflow-y-auto px-6 pb-28 hide-scrollbar space-y-3">
-                        {activities.map((act) => (
-                            <div key={act.id} className="group relative overflow-hidden flex items-center gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04] hover:border-cyan-500/20 transition-all cursor-pointer active:scale-[0.99] shadow-sm hover:shadow-lg">
-                                {/* Hover Glow Line */}
-                                <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
-
-                                <div className="relative z-10 size-12 rounded-2xl bg-[#111] flex items-center justify-center border border-white/[0.08] group-hover:scale-105 transition-transform shadow-inner">
-                                    <Icon name={act.icon} className="text-cyan-200 text-xl" />
-                                </div>
-                                
-                                <div className="relative z-10 flex-1 min-w-0">
-                                    <h4 className="text-sm font-bold text-gray-200 truncate group-hover:text-white transition-colors">{act.title}</h4>
-                                    <p className="text-[10px] text-gray-500 font-bold tracking-wide flex items-center gap-1.5 mt-1 uppercase">
-                                        <span className="truncate max-w-[100px] text-cyan-500/80">{act.category}</span>
-                                        <span className="size-0.5 rounded-full bg-gray-600"></span>
-                                        <span>{new Date(act.time).toLocaleDateString()} - {new Date(act.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
-                                    </p>
-                                </div>
-                                
-                                <div className="relative z-10 flex items-center gap-2"> {/* Added flex container for amount and delete button */}
-                                    <p className="text-sm font-bold text-white group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.3)] transition-all tabular-nums">
-                                        -${act.amount}
-                                    </p>
-                                    <button 
-                                        onClick={(e) => { e.stopPropagation(); deleteActivity(act.id); }} 
-                                        className="size-6 rounded-full bg-white/5 flex items-center justify-center text-gray-700 hover:bg-rose-500 hover:text-white transition-all"
-                                        aria-label="Delete activity"
-                                    >
-                                        <Icon name="delete" className="text-sm" />
-                                    </button>
-                                </div>
+                        {filteredActivities.length === 0 ? (
+                            <div className="text-center text-gray-500 text-sm py-8">
+                                No activities found for this timeframe.
                             </div>
-                        ))}
+                        ) : (
+                            filteredActivities.map((act) => (
+                                <div key={act.id} className="group relative overflow-hidden flex items-center gap-4 p-4 rounded-2xl bg-white/[0.02] border border-white/[0.05] hover:bg-white/[0.04] hover:border-cyan-500/20 transition-all cursor-pointer active:scale-[0.99] shadow-sm hover:shadow-lg">
+                                    {/* Hover Glow Line */}
+                                    <div className="absolute left-0 top-0 bottom-0 w-[2px] bg-cyan-400 opacity-0 group-hover:opacity-100 transition-opacity duration-300 shadow-[0_0_10px_rgba(34,211,238,0.8)]"></div>
+
+                                    <div className="relative z-10 size-12 rounded-2xl bg-[#111] flex items-center justify-center border border-white/[0.08] group-hover:scale-105 transition-transform shadow-inner">
+                                        <Icon name={act.icon} className="text-cyan-200 text-xl" />
+                                    </div>
+                                    
+                                    <div className="relative z-10 flex-1 min-w-0">
+                                        <h4 className="text-sm font-bold text-gray-200 truncate group-hover:text-white transition-colors">{act.title}</h4>
+                                        <p className="text-[10px] text-gray-500 font-bold tracking-wide flex items-center gap-1.5 mt-1 uppercase">
+                                            <span className="truncate max-w-[100px] text-cyan-500/80">{act.category}</span>
+                                            <span className="size-0.5 rounded-full bg-gray-600"></span>
+                                            <span>{new Date(act.time).toLocaleDateString()} - {new Date(act.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                        </p>
+                                    </div>
+                                    
+                                    <div className="relative z-10 flex items-center gap-2"> {/* Added flex container for amount and delete button */}
+                                        <p className="text-sm font-bold text-white group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.3)] transition-all tabular-nums">
+                                            -${act.amount}
+                                        </p>
+                                        <button 
+                                            onClick={(e) => { e.stopPropagation(); deleteActivity(act.id); }} 
+                                            className="size-6 rounded-full bg-white/5 flex items-center justify-center text-gray-700 hover:bg-rose-500 hover:text-white transition-all"
+                                            aria-label="Delete activity"
+                                        >
+                                            <Icon name="delete" className="text-sm" />
+                                        </button>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                         
                         {/* Empty State Spacer */}
                         <div className="h-4"></div>
@@ -202,8 +324,7 @@ const BookkeepingScreen = () => {
                             <p className="text-[9px] text-gray-500 uppercase tracking-widest font-bold">End of List</p>
                             <div className="h-px w-8 bg-gray-500"></div>
                         </div>
-                    </div>
-                </div>
+                    </div>                </div>
             </div>
         </AppShell>
     );
