@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import { AppShell, Icon } from '../components/UI';
 import { Assets } from '../types';
-import { GoogleGenerativeAI, Chat, GenerateContentResponse } from "@google/generative-ai";
+import { GoogleGenerativeAI, Chat } from "@google/generative-ai";
 
 // --- UI COMPONENTS ---
 
@@ -878,6 +878,8 @@ export const SettingsScreen = () => {
     );
 };
 
+const CONCIERGE_SYSTEM = "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to general financial knowledge. Be concise, professional, and helpful.";
+
 export const AIConciergeScreen = () => {
     const navigate = useNavigate();
     const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([
@@ -885,30 +887,30 @@ export const AIConciergeScreen = () => {
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
+    const [apiKeyReady, setApiKeyReady] = useState(false);
     const bottomRef = useRef<HTMLDivElement>(null);
     const chatSession = useRef<Chat | null>(null);
+    const lastApiKeyRef = useRef<string | undefined>();
 
     useEffect(() => {
-        const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY; // 确保在 useEffect 内部获取最新值
+        const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY;
 
-        // 添加条件：如果 chatSession 未初始化，或 geminiApiKey 改变，则重新初始化
-        if (!chatSession.current || chatSession.current.apiKey !== geminiApiKey) { 
-            if (!geminiApiKey) {
-                console.error("Gemini API Key is not set. Please add VITE_GEMINI_API_KEY to your .env file.");
-                alert("错误：Gemini API Key 未设置。请检查您的 .env.local 文件并确保已重启开发服务器。"); // 添加 alert 提示
-                return;
-            }
-            const ai = new GoogleGenerativeAI({ apiKey: geminiApiKey });
-            const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
-            chatSession.current = model.startChat({
-                config: {
-                    systemInstruction: "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to general financial knowledge. Be concise, professional, and helpful.",
-                },
-            });
-            // 将新的 API Key 存储到 chatSession.current 中，以便下次检查
-            chatSession.current.apiKey = geminiApiKey;
+        if (!geminiApiKey) {
+            setApiKeyReady(false);
+            return;
         }
-    }, [import.meta.env.VITE_GEMINI_API_KEY]); // <-- 修改依赖项为 VITE_GEMINI_API_KEY
+        if (lastApiKeyRef.current === geminiApiKey && chatSession.current) {
+            setApiKeyReady(true);
+            return;
+        }
+
+        lastApiKeyRef.current = geminiApiKey;
+        const ai = new GoogleGenerativeAI(geminiApiKey);
+        const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+        // Gemini 2.5-flash 对 system_instruction 的 Content 格式较严，此处不传；人设改由首条用户消息带入
+        chatSession.current = model.startChat();
+        setApiKeyReady(true);
+    }, [import.meta.env.VITE_GEMINI_API_KEY]);
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -921,13 +923,19 @@ export const AIConciergeScreen = () => {
         setMessages(prev => [...prev, {role: 'user', text: userText}]);
         setLoading(true);
 
+        // 首条用户消息附带人设（因 gemini-2.5-flash 对 system_instruction 格式限制暂不传）
+        const payload = messages.length <= 1
+            ? `${CONCIERGE_SYSTEM}\n\n---\n\nUser: ${userText}`
+            : userText;
+
         try {
-            const result = await chatSession.current.sendMessage(userText);
-            const responseText = result.text || "I'm sorry, I couldn't generate a response.";
+            const result = await chatSession.current.sendMessage(payload);
+            const responseText = result.response?.text?.() ?? "I'm sorry, I couldn't generate a response.";
             setMessages(prev => [...prev, {role: 'model', text: responseText}]);
         } catch (error) {
-            console.error(error);
-            setMessages(prev => [...prev, {role: 'model', text: "I apologize, but I am unable to process your request at this moment."}]);
+            console.error("AI Concierge error:", error);
+            const errMsg = error instanceof Error ? error.message : "Request failed.";
+            setMessages(prev => [...prev, {role: 'model', text: `抱歉，请求暂时无法处理。${errMsg}`}]);
         } finally {
             setLoading(false);
         }
@@ -1001,6 +1009,11 @@ export const AIConciergeScreen = () => {
                 </div>
 
                 {/* Input Area */}
+                {!apiKeyReady && (
+                    <div className="px-6 pb-4 text-center">
+                        <p className="text-xs text-amber-400/90">未配置 Gemini API Key，无法与 AI 对话。请在项目根目录 <code className="bg-white/10 px-1 rounded">.env</code> 中设置 <code className="bg-white/10 px-1 rounded">VITE_GEMINI_API_KEY</code> 并重启开发服务器。</p>
+                    </div>
+                )}
                 <div className="p-4 px-6 pb-8 bg-gradient-to-t from-[#050B08] via-[#050B08] to-transparent z-20">
                     <div className="relative group">
                          {/* Input Glow */}
@@ -1011,12 +1024,13 @@ export const AIConciergeScreen = () => {
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                                placeholder="Ask about markets, analysis..."
-                                className="flex-1 bg-transparent h-14 pl-6 pr-4 text-white placeholder:text-gray-600 focus:outline-none text-sm font-medium"
+                                placeholder={apiKeyReady ? "Ask about markets, analysis..." : "请先配置 VITE_GEMINI_API_KEY"}
+                                disabled={!apiKeyReady}
+                                className="flex-1 bg-transparent h-14 pl-6 pr-4 text-white placeholder:text-gray-600 focus:outline-none text-sm font-medium disabled:opacity-60"
                              />
                              <button 
                                 onClick={handleSend}
-                                disabled={loading || !input.trim()}
+                                disabled={loading || !input.trim() || !apiKeyReady}
                                 className="mr-2 size-10 rounded-full bg-white/5 flex items-center justify-center text-gray-400 hover:bg-brand-emerald hover:text-white hover:shadow-[0_0_15px_rgba(16,185,129,0.4)] disabled:opacity-30 disabled:hover:bg-white/5 disabled:hover:text-gray-400 transition-all duration-300"
                             >
                                 <Icon name="arrow_upward" className="text-lg" />
