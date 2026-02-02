@@ -48,23 +48,37 @@ const OverviewScreen = () => {
         return found ? found.raw > 0 : false;
     }, [selectedCategory, totalNetWorth, categories]);
 
-    // Smoother, more premium looking chart path generation
+    const chartWidth = 400;
+    const chartHeight = 160;
+    const flatLineY = 80; // 无数据时水平线 y 位置
+
+    /** 无数据时：生成一条水平直线路径 */
+    const generateFlatPath = () => {
+        return `M 0,${flatLineY} L ${chartWidth},${flatLineY}`;
+    };
+
+    /** 有数据时：按 1d / 1w / 1m / 1y 区分波动与趋势 */
     const generateMockPath = (category: string, timeframe: string, rawVal?: number) => {
-        const points = 30; // More points for smoother curve
-        const width = 400;
+        const points = timeframe === '1d' ? 12 : timeframe === '1w' ? 20 : 30;
+        const width = chartWidth;
         const height = 120;
-        let seed = (rawVal || totalNetWorth) / 1000 + timeframe.length;
-        
+        const seed = (rawVal || totalNetWorth) / 1000 + timeframe.length;
+
+        const config = {
+            '1d': { noise: 2, trend: 0 },   // 一天：几乎平直
+            '1w': { noise: 6, trend: 8 },  // 一周：小幅波动
+            '1m': { noise: 12, trend: 15 }, // 一月：中等波动与趋势
+            '1y': { noise: 18, trend: 35 }, // 一年：明显趋势与波动
+        }[timeframe] || { noise: 12, trend: 15 };
+
         const coords = Array.from({ length: points }, (_, i) => {
             const x = (i / (points - 1)) * width;
-            // Gentler noise for "executive" feel
-            const noise = Math.sin(i * 0.3 + seed) * 10; 
-            const trend = (i / points) * (timeframe === '1y' || timeframe === 'all' ? 30 : 5);
+            const noise = Math.sin(i * 0.3 + seed) * config.noise;
+            const trend = (i / points) * config.trend;
             const y = (height / 1.5) + noise - trend;
             return `${x},${y}`;
         }).join(' ');
-        
-        // Ensure starting point is smooth
+
         return `M ${coords}`;
     };
 
@@ -120,37 +134,55 @@ const OverviewScreen = () => {
                             </div>
                         </div>
 
-                        {/* Chart Area */}
-                        {hasChartData ? (
-                            <div className="h-48 w-full relative">
-                                 <svg className="w-full h-full overflow-visible" viewBox="0 0 400 160" preserveAspectRatio="none">
-                                    <defs>
-                                        <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                                            <stop offset="0%" stopColor="#10B981" stopOpacity="0.2"/>
-                                            <stop offset="100%" stopColor="#10B981" stopOpacity="0"/>
-                                        </linearGradient>
-                                    </defs>
-                                    <path 
-                                        d={generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} 
-                                        fill="none" 
-                                        stroke="#10B981" 
-                                        strokeWidth="3" 
-                                        strokeLinecap="round" 
-                                        strokeLinejoin="round"
-                                        className="transition-all duration-700 ease-in-out"
-                                    />
-                                    <path 
-                                        d={`${generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} L 400,150 L 0,150 Z`} 
-                                        fill="url(#chartGradient)" 
-                                        className="transition-all duration-700 ease-in-out opacity-80"
-                                    />
-                                 </svg>
-                            </div>
-                        ) : (
-                            <div className="h-40 w-full relative flex items-center justify-center text-gray-500 text-sm">
-                                No data available for this category.
-                            </div>
-                        )}
+                        {/* Chart Area：无数据时显示水平直线，有数据时按 1d/1m/1y 显示变化 */}
+                        <div className="h-48 w-full relative">
+                            <svg className="w-full h-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} preserveAspectRatio="none">
+                                <defs>
+                                    <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor="#10B981" stopOpacity="0.2"/>
+                                        <stop offset="100%" stopColor="#10B981" stopOpacity="0"/>
+                                    </linearGradient>
+                                </defs>
+                                {hasChartData ? (
+                                    <>
+                                        <path
+                                            d={generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)}
+                                            fill="none"
+                                            stroke="#10B981"
+                                            strokeWidth="3"
+                                            strokeLinecap="round"
+                                            strokeLinejoin="round"
+                                            className="transition-all duration-700 ease-in-out"
+                                        />
+                                        <path
+                                            d={`${generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} L ${chartWidth},150 L 0,150 Z`}
+                                            fill="url(#chartGradient)"
+                                            className="transition-all duration-700 ease-in-out opacity-80"
+                                        />
+                                    </>
+                                ) : (
+                                    <>
+                                        <path
+                                            d={generateFlatPath()}
+                                            fill="none"
+                                            stroke="#10B981"
+                                            strokeWidth="2"
+                                            strokeLinecap="round"
+                                            strokeDasharray="4 4"
+                                            className="opacity-60 transition-all duration-500"
+                                        />
+                                        <path
+                                            d={`${generateFlatPath()} L ${chartWidth},150 L 0,150 Z`}
+                                            fill="url(#chartGradient)"
+                                            className="opacity-40 transition-all duration-500"
+                                        />
+                                    </>
+                                )}
+                            </svg>
+                            {!hasChartData && (
+                                <p className="absolute bottom-0 left-0 right-0 text-center text-[10px] text-gray-500 uppercase tracking-wider">暂无资产数据 · 录入资产后可查看 1d / 1m / 1y 变化</p>
+                            )}
+                        </div>
                     </div>
                 </div>
 

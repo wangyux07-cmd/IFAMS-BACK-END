@@ -22,8 +22,31 @@ const RATES: { [key: string]: number } = {
     'JPY': 0.0068
 };
 
-// Mock "Previous Month" Net Worth to simulate growth logic
-const PREVIOUS_MONTH_NET_WORTH = 0; // 修改为0
+const NET_WORTH_SNAPSHOT_KEY = 'ifams_net_worth_snapshot';
+
+interface NetWorthSnapshot {
+    currentMonth: string;
+    currentMonthNetWorth: number;
+    previousMonthNetWorth: number;
+}
+
+function getStoredSnapshot(userId: string): NetWorthSnapshot | null {
+    try {
+        const raw = localStorage.getItem(`${NET_WORTH_SNAPSHOT_KEY}_${userId}`);
+        if (!raw) return null;
+        const parsed = JSON.parse(raw) as NetWorthSnapshot;
+        if (parsed.currentMonth && typeof parsed.currentMonthNetWorth === 'number' && typeof parsed.previousMonthNetWorth === 'number') {
+            return parsed;
+        }
+    } catch (_) {}
+    return null;
+}
+
+function setStoredSnapshot(userId: string, snapshot: NetWorthSnapshot) {
+    try {
+        localStorage.setItem(`${NET_WORTH_SNAPSHOT_KEY}_${userId}`, JSON.stringify(snapshot));
+    } catch (_) {}
+}
 
 export const AppProvider = ({ children }: { children?: ReactNode }) => {
     const [user, setUser] = useState<User | null>(null);
@@ -31,13 +54,14 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
     const [activities, setActivities] = useState<Activity[]>([]);
     const [assetItems, setAssetItems] = useState<AssetItem[]>([]);
     const [loading, setLoading] = useState(true);
+    const [previousMonthNetWorth, setPreviousMonthNetWorth] = useState(0);
 
     // Fetch user profile from Supabase
     const fetchUserProfile = async (userId: string) => {
         console.log('fetchUserProfile: Attempting to fetch profile for userId:', userId);
         try {
             const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("fetchUserProfile: Supabase请求超时（3秒未响应）")), 3000)
+                setTimeout(() => reject(new Error("fetchUserProfile: Supabase request timed out (3s)")), 3000)
             );
 
             const fetchPromise = supabase.from('profiles').select('*').eq('id', userId).single();
@@ -67,7 +91,7 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         console.log('fetchAssetItems: Attempting to fetch asset items for userId:', userId);
         try {
             const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("fetchAssetItems: Supabase请求超时（3秒未响应）")), 3000)
+                setTimeout(() => reject(new Error("fetchAssetItems: Supabase request timed out (3s)")), 3000)
             );
 
             const fetchPromise = supabase.from('asset_items').select('*').eq('user_id', userId).order('date', { ascending: false });
@@ -92,13 +116,11 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         console.log('fetchActivities: Attempting to fetch activities for userId:', userId);
         try {
             const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("fetchActivities: Supabase请求超时（3秒未响应）")), 3000)
+                setTimeout(() => reject(new Error("fetchActivities: Supabase request timed out (3s)")), 3000)
             );
 
-            const query = supabase.from('activities').select('*').eq('user_id', userId).order('time', { ascending: false });
-            console.log('fetchActivities: Supabase Query SQL:', query.toSql()); // 添加这一行
-
-            const { data, error } = await Promise.race([query, timeoutPromise]);
+            const queryPromise = supabase.from('activities').select('*').eq('user_id', userId).order('time', { ascending: false });
+            const { data, error } = await Promise.race([queryPromise, timeoutPromise]);
 
             if (error) {
                 console.error('fetchActivities: Error fetching activities:', JSON.stringify(error, null, 2));
@@ -199,29 +221,61 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
         return (assets.cash + assets.equities + assets.fixedIncome + assets.fx + assets.insurance) - assets.liabilities;
     }, [assets]);
 
-    // Calculate Dynamic Growth based on totalNetWorth vs PREVIOUS_MONTH_NET_WORTH
-    const growthMetrics = useMemo<GrowthMetrics>(() => {
-        const diff = totalNetWorth - PREVIOUS_MONTH_NET_WORTH;
-        let percent = 0;
-        if (PREVIOUS_MONTH_NET_WORTH === 0 && totalNetWorth === 0) {
-            // 如果上月净资产和当前净资产都为0，增长百分比也视为0
-            percent = 0;
-        } else if (PREVIOUS_MONTH_NET_WORTH === 0 && totalNetWorth !== 0) {
-            // 如果上月净资产为0，但当前净资产不为0，表示从无到有，增长百分比设为100% (代表有增长) 或一个特殊值
-            // 为了避免Infinity，这里可以设定一个合理的默认值，比如初次增长
-            percent = 100; // 或者设置为0，具体取决于产品需求
+    // Persist net worth by month and derive previous month for growth (localStorage per user)
+    useEffect(() => {
+        if (!user?.id) {
+            setPreviousMonthNetWorth(0);
+            return;
+        }
+        const currentMonth = new Date().toISOString().slice(0, 7);
+        const stored = getStoredSnapshot(user.id);
+
+        if (!stored) {
+            setPreviousMonthNetWorth(0);
+            setStoredSnapshot(user.id, {
+                currentMonth,
+                currentMonthNetWorth: totalNetWorth,
+                previousMonthNetWorth: 0
+            });
+            return;
+        }
+
+        if (stored.currentMonth < currentMonth) {
+            setPreviousMonthNetWorth(stored.currentMonthNetWorth);
+            setStoredSnapshot(user.id, {
+                currentMonth,
+                currentMonthNetWorth: totalNetWorth,
+                previousMonthNetWorth: stored.currentMonthNetWorth
+            });
+        } else if (stored.currentMonth === currentMonth) {
+            setPreviousMonthNetWorth(stored.previousMonthNetWorth);
+            setStoredSnapshot(user.id, {
+                ...stored,
+                currentMonthNetWorth: totalNetWorth
+            });
         } else {
-            // 正常计算
-            percent = (diff / PREVIOUS_MONTH_NET_WORTH) * 100;
+            setPreviousMonthNetWorth(stored.previousMonthNetWorth);
+        }
+    }, [user?.id, totalNetWorth]);
+
+    const growthMetrics = useMemo<GrowthMetrics>(() => {
+        const diff = totalNetWorth - previousMonthNetWorth;
+        let percent = 0;
+        if (previousMonthNetWorth === 0 && totalNetWorth === 0) {
+            percent = 0;
+        } else if (previousMonthNetWorth === 0 && totalNetWorth !== 0) {
+            percent = 100;
+        } else {
+            percent = (diff / previousMonthNetWorth) * 100;
         }
 
         return {
             amount: diff,
-            percent: percent,
-            isPositive: diff >= 0, // isPositive 仍然基于 diff
-            prevNetWorth: PREVIOUS_MONTH_NET_WORTH
+            percent,
+            isPositive: diff >= 0,
+            prevNetWorth: previousMonthNetWorth
         };
-    }, [totalNetWorth]);
+    }, [totalNetWorth, previousMonthNetWorth]);
 
     // Dynamic AI Score based on Solvency Ratio and Net Worth
     const financialScore = useMemo(() => {
@@ -242,42 +296,48 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
     }, [totalNetWorth, assets, activities, assetItems]); // 添加 assetItems 到依赖数组
 
     const solvencyAnalysis = useMemo<AnalysisData>(() => {
-        if (assetItems.length === 0) {
+        if (assetItems.length === 0 || (totalNetWorth === 0 && assets.liabilities === 0)) {
             return {
                 score: 0,
                 metricValue: "N/A",
                 description: "No asset data available.",
                 drivers: [],
-                insights: ["Please add assets to get a solvency analysis."],
+                insights: ["Add assets and liabilities to get a solvency analysis.", "Equity % = Net Worth / Total Assets."],
                 formula: "Total Equity / Total Assets",
                 formulaExplanation: "Measures the proportion of assets financed by equity. A higher percentage indicates stronger solvency."
             };
         }
         const totalAssets = totalNetWorth + assets.liabilities;
-        const equityPercentage = (totalNetWorth / (totalAssets || 1)) * 100;
+        const equityPercentage = totalAssets > 0 ? (totalNetWorth / totalAssets) * 100 : 0;
         let score = 0;
 
-        if (equityPercentage < 0) { // Negative equity means insolvency
+        if (equityPercentage < 0) {
             score = 0;
-        } else if (equityPercentage >= 50) { // 50% equity is generally very strong
+        } else if (equityPercentage >= 50) {
             score = 100;
-        } else { // Scale linearly from 0% to 50% equity
+        } else {
             score = (equityPercentage / 50) * 100;
         }
-        
+
+        const roundedScore = Math.min(100, Math.round(score));
+        const insights = roundedScore >= 80
+            ? ["Strong solvency: your equity share is healthy.", "Consider maintaining or diversifying without adding debt."]
+            : roundedScore >= 50
+                ? ["Moderate solvency; room to improve.", "Focus on paying down debt or building assets to raise equity %."]
+                : roundedScore > 0
+                    ? ["Low equity share; higher reliance on debt.", "Prioritise debt repayment and avoid new leverage."]
+                    : ["Negative or zero equity indicates insolvency risk.", "Address liabilities and build positive net worth."];
+
         return {
-            score: Math.min(100, Math.round(score)), // Cap score at 100
+            score: roundedScore,
             metricValue: `${equityPercentage.toFixed(1)}%`,
             description: "The percentage of your assets financed by equity.",
             drivers: [
-                { label: 'Net Worth', value: `$${(totalNetWorth/1000).toFixed(0)}k`, trend: 'up' },
-                { label: 'Total Assets', value: `$${(totalAssets/1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Net Worth', value: `$${(totalNetWorth / 1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Total Assets', value: `$${(totalAssets / 1000).toFixed(0)}k`, trend: 'up' },
                 { label: 'Debt Ratio', value: `${((assets.liabilities / (totalAssets || 1)) * 100).toFixed(0)}%`, trend: 'down' },
             ],
-            insights: [
-                "A higher equity percentage indicates stronger financial stability and lower reliance on debt.",
-                "Review your debt levels if your equity percentage is consistently low."
-            ],
+            insights,
             formula: "Total Equity / Total Assets",
             formulaExplanation: "This ratio indicates the proportion of total assets that are financed by shareholders' equity. A higher percentage suggests better long-term solvency."
         };
@@ -290,7 +350,7 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
                 metricValue: "N/A",
                 description: "No asset data available.",
                 drivers: [],
-                insights: ["Please add assets to get a liquidity analysis."],
+                insights: ["Add assets to get a liquidity analysis.", "Liquidity = (Cash + FX) / Net Worth."],
                 formula: "(Liquid Assets / Total Net Worth)",
                 formulaExplanation: "Measures how quickly you can convert assets to cash without significant loss of value."
             };
@@ -301,56 +361,129 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
 
         if (totalNetWorth > 0) {
             percentage = (liquidAssets / totalNetWorth) * 100;
-            // Score 100 if 25% of net worth is liquid
             score = Math.min(100, percentage * 4);
         } else {
-            // If net worth is zero or negative, any liquid assets are good.
             if (liquidAssets > 0) {
                 score = 100;
-                percentage = 100; // Represent as 100% for display
+                percentage = 100;
             } else {
                 score = 0;
                 percentage = 0;
             }
         }
 
+        const roundedScore = Math.round(score);
+        const insights = roundedScore >= 80
+            ? ["Strong liquidity: you can cover needs with cash/FX.", "Consider keeping 3–6 months of expenses in liquid assets."]
+            : roundedScore >= 50
+                ? ["Moderate liquidity; adequate for most emergencies.", "Consider increasing cash/FX if you expect large outlays."]
+                : roundedScore > 0
+                    ? ["Low liquidity; most wealth is in less liquid assets.", "Build an emergency buffer in cash or high-yield savings."]
+                    : ["No liquid assets; consider building cash reserves.", "Aim for at least a small cash buffer for short-term needs."];
+
         return {
-            score: Math.round(score),
+            score: roundedScore,
             metricValue: totalNetWorth > 0 ? `${percentage.toFixed(1)}%` : (liquidAssets > 0 ? "High" : "None"),
             description: "The percentage of your net worth that is readily available as cash or cash equivalents.",
             drivers: [
-                { label: 'Cash', value: `$${(assets.cash/1000).toFixed(0)}k`, trend: 'up' },
-                { label: 'Equities', value: `$${(assets.equities/1000).toFixed(0)}k`, trend: 'up' },
-                { label: 'Fixed Income', value: `$${(assets.fixedIncome/1000).toFixed(0)}k`, trend: 'neutral' },
+                { label: 'Cash', value: `$${(assets.cash / 1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Equities', value: `$${(assets.equities / 1000).toFixed(0)}k`, trend: 'up' },
+                { label: 'Fixed Income', value: `$${(assets.fixedIncome / 1000).toFixed(0)}k`, trend: 'neutral' },
             ],
-            insights: [
-                "Your current liquidity is adequate for emergencies.",
-                "To enhance liquidity, consider moving some less-liquid assets into a high-yield savings account."
-            ],
+            insights,
             formula: "(Liquid Assets / Total Net Worth)",
             formulaExplanation: "Measures how quickly you can convert assets to cash without significant loss of value."
         };
     }, [assetItems, totalNetWorth, assets]);
 
-    const incomeStabilityAnalysis = useMemo<AnalysisData>(() => ({
-        score: 0,
-        metricValue: "N/A",
-        description: "Analysis of your recurring income sources versus your expenses.",
-        drivers: [],
-        insights: ["Income stability data is not yet available.", "Connect your income and expense accounts for a full analysis."],
-        formula: "(Recurring Income / Monthly Expenses)",
-        formulaExplanation: "This ratio shows your ability to cover expenses with your regular income."
-    }), []);
+    const incomeStabilityAnalysis = useMemo<AnalysisData>(() => {
+        if (assetItems.length === 0) {
+            return {
+                score: 0,
+                metricValue: "N/A",
+                description: "Analysis of recurring income versus expenses.",
+                drivers: [],
+                insights: ["Add assets and record expenses to get income stability analysis.", "Stability = Cash runway vs monthly expenses."],
+                formula: "(Cash / Monthly Expenses)",
+                formulaExplanation: "Months of runway: how long cash can cover expenses."
+            };
+        }
+        const now = Date.now();
+        const thirtyDaysAgo = now - 30 * 24 * 60 * 60 * 1000;
+        const recentExpenses = activities
+            .filter(a => new Date(a.time).getTime() >= thirtyDaysAgo)
+            .reduce((sum, a) => sum + (parseFloat(a.amount) || 0), 0);
+        const monthlyExpense = recentExpenses || 0;
+        const runwayMonths = monthlyExpense > 0 ? assets.cash / monthlyExpense : (assets.cash > 0 ? 12 : 0);
+        const ratio = monthlyExpense > 0 ? assets.cash / monthlyExpense : (assets.cash > 0 ? 12 : 0);
+        let score = 0;
+        if (ratio >= 6 || (monthlyExpense === 0 && assets.cash > 0)) score = 100;
+        else if (ratio >= 3) score = 50 + (ratio - 3) * (50 / 3);
+        else if (ratio > 0) score = (ratio / 3) * 50;
+        const roundedScore = Math.min(100, Math.round(score));
+        const insights = roundedScore >= 80
+            ? ["Strong runway: cash covers several months of expenses.", "Maintain this buffer; consider investing surplus."]
+            : roundedScore >= 50
+                ? ["Moderate runway; adequate for short-term stability.", "Aim for 3–6 months of expenses in cash."]
+                : roundedScore > 0
+                    ? ["Low runway; build cash to cover 3+ months of expenses.", "Track expenses and avoid large outlays until buffer is higher."]
+                    : ["No cash buffer or no expense data.", "Record expenses and build cash for income stability."];
 
-    const growthAnalysis = useMemo<AnalysisData>(() => ({
-        score: 0,
-        metricValue: "+$0.00k",
-        description: "The growth of your net worth over the selected period.",
-        drivers: [],
-        insights: ["Historical growth data is not yet available.", "Consistent investment and saving are key drivers for long-term growth."],
-        formula: "(End NW - Start NW) / Start NW",
-        formulaExplanation: "Calculates the percentage change in your net worth over a period."
-    }), []);
+        return {
+            score: roundedScore,
+            metricValue: monthlyExpense > 0 ? `${runwayMonths.toFixed(1)} mo` : (assets.cash > 0 ? "N/A (no expenses)" : "0 mo"),
+            description: "Months of expenses your cash can cover (runway).",
+            drivers: [
+                { label: 'Cash', value: `$${(assets.cash / 1000).toFixed(0)}k`, trend: 'up' },
+                { label: '30d Expenses', value: `$${monthlyExpense.toFixed(0)}`, trend: 'down' },
+                { label: 'Runway', value: `${runwayMonths.toFixed(1)} mo`, trend: 'up' },
+            ],
+            insights,
+            formula: "(Cash / Monthly Expenses)",
+            formulaExplanation: "Months of runway: how long cash can cover expenses without income."
+        };
+    }, [assetItems, assets, activities]);
+
+    const growthAnalysis = useMemo<AnalysisData>(() => {
+        if (assetItems.length === 0) {
+            return {
+                score: 0,
+                metricValue: "+$0k",
+                description: "The growth of your net worth over the selected period.",
+                drivers: [],
+                insights: ["Add assets to see growth analysis.", "Growth = (Current NW - Previous NW) / Previous NW."],
+                formula: "(End NW - Start NW) / Start NW",
+                formulaExplanation: "Percentage change in net worth over the period."
+            };
+        }
+        const { amount, percent, isPositive } = growthMetrics;
+        const score = previousMonthNetWorth === 0
+            ? (totalNetWorth > 0 ? 100 : 0)
+            : Math.min(100, Math.max(0, 50 + (percent / 2)));
+        const roundedScore = Math.round(score);
+        const metricValue = amount >= 0 ? `+$${(amount / 1000).toFixed(0)}k` : `-$${Math.abs(amount / 1000).toFixed(0)}k`;
+        const insights = roundedScore >= 80
+            ? ["Net worth is growing; keep saving and investing.", "Consider rebalancing and tax-efficient strategies."]
+            : roundedScore >= 50
+                ? ["Moderate growth or stable; room to improve.", "Increase savings rate or returns where appropriate."]
+                : roundedScore > 0
+                    ? ["Growth is low or negative; review spending and income.", "Focus on debt paydown and consistent saving."]
+                    : ["No prior baseline or negative growth.", "Build a baseline and track changes over time."];
+
+        return {
+            score: roundedScore,
+            metricValue,
+            description: "The change in your net worth vs previous period.",
+            drivers: [
+                { label: 'Change', value: metricValue, trend: isPositive ? 'up' : 'down' },
+                { label: 'Growth %', value: `${percent.toFixed(1)}%`, trend: isPositive ? 'up' : 'down' },
+                { label: 'Net Worth', value: `$${(totalNetWorth / 1000).toFixed(0)}k`, trend: 'up' },
+            ],
+            insights,
+            formula: "(End NW - Start NW) / Start NW",
+            formulaExplanation: "Percentage change in net worth over the period."
+        };
+    }, [assetItems, totalNetWorth, growthMetrics, previousMonthNetWorth]);
 
     const riskResilienceAnalysis = useMemo<AnalysisData>(() => {
         if (assetItems.length === 0) {
@@ -359,12 +492,12 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
                 metricValue: "N/A",
                 description: "No asset data available.",
                 drivers: [],
-                insights: ["Please add assets to get a risk analysis."],
+                insights: ["Add assets to get a risk analysis.", "Risk score reflects equity exposure vs net worth."],
                 formula: "(Equities / Net Worth %)",
                 formulaExplanation: "A simplified risk score based on equity exposure. Higher equity allocation leads to higher risk and a higher score."
             };
         }
-        
+
         let score = 0;
         let equitiesPercentage = 0;
 
@@ -372,11 +505,10 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
             equitiesPercentage = (assets.equities / totalNetWorth) * 100;
             score = equitiesPercentage;
         } else {
-            // If net worth is zero or negative, any equity exposure is high risk
             if (assets.equities > 0) {
-                score = 100; // Max risk score
+                score = 100;
             } else {
-                score = 0; // No equity exposure, so no risk from this metric
+                score = 0;
             }
         }
 
@@ -386,21 +518,27 @@ export const AppProvider = ({ children }: { children?: ReactNode }) => {
             if (s > 40) return "Medium";
             if (s > 20) return "Low";
             return "Very Low";
-        }
+        };
+
+        const roundedScore = Math.min(100, Math.round(score));
+        const insights = roundedScore >= 80
+            ? ["High equity exposure: higher return potential and volatility.", "Ensure you have liquidity and time horizon for downturns."]
+            : roundedScore >= 50
+                ? ["Moderate equity exposure; balanced risk/return.", "Consider diversification across regions and sectors."]
+                : roundedScore > 0
+                    ? ["Lower equity exposure: lower volatility, lower growth potential.", "Consider adding growth assets if horizon is long."]
+                    : ["No equity exposure; portfolio is conservative.", "Consider a small equity allocation for long-term growth."];
 
         return {
-            score: Math.min(100, Math.round(score)),
+            score: roundedScore,
             metricValue: getMetricValue(score),
             description: "Your portfolio's ability to withstand market volatility and downturns.",
             drivers: [
                 { label: 'Equities %', value: `${equitiesPercentage.toFixed(0)}%`, trend: 'neutral' },
-                { label: 'Insurance', value: `$${(assets.insurance/1000).toFixed(0)}k`, trend: 'neutral' },
+                { label: 'Insurance', value: `$${(assets.insurance / 1000).toFixed(0)}k`, trend: 'neutral' },
                 { label: 'Diversification', value: 'N/A', trend: 'neutral' },
             ],
-            insights: [
-                "This score primarily reflects risk from equity exposure.",
-                "A lower score suggests lower volatility, while a higher score suggests higher potential returns but also higher risk."
-            ],
+            insights,
             formula: "(Equities / Net Worth %)",
             formulaExplanation: "A simplified risk score based on equity exposure. Higher equity allocation leads to higher risk and a higher score."
         };

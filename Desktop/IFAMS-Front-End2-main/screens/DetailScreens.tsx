@@ -2,7 +2,7 @@ import React, { useContext, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import { AppShell, Icon } from '../components/UI';
-import { Assets } from '../types';
+import { Assets, AssetItem } from '../types';
 import { GoogleGenerativeAI, Chat } from "@google/generative-ai";
 
 // --- UI COMPONENTS ---
@@ -878,12 +878,43 @@ export const SettingsScreen = () => {
     );
 };
 
-const CONCIERGE_SYSTEM = "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to general financial knowledge. Be concise, professional, and helpful.";
+const CONCIERGE_SYSTEM = "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to the user's real portfolio data below. Use it to give personalized advice on allocation, risk, liquidity, and goals. Be concise, professional, and helpful. Always respond in English only.";
+
+/** Build portfolio summary from AppContext for AI to give advice on real data */
+function buildPortfolioSummary(context: { assets: Assets; totalNetWorth: number; assetItems: AssetItem[]; financialScore: number } | null): string {
+    if (!context) return "No portfolio data available.";
+    const { assets, totalNetWorth, assetItems, financialScore } = context;
+    const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
+    const lines = [
+        `Total Net Worth: ${fmt(totalNetWorth)}`,
+        `Cash: ${fmt(assets.cash)}`,
+        `Equities: ${fmt(assets.equities)}`,
+        `Fixed Income: ${fmt(assets.fixedIncome)}`,
+        `FX Holdings: ${fmt(assets.fx)}`,
+        `Insurance: ${fmt(assets.insurance)}`,
+        `Liabilities: ${fmt(assets.liabilities)}`,
+        `Financial Health Score: ${financialScore}/100`,
+    ];
+    if (assetItems.length > 0) {
+        const top = [...assetItems].sort((a, b) => b.amount - a.amount).slice(0, 8);
+        lines.push("Top holdings: " + top.map(i => `${i.name} (${i.asset_key}): ${fmt(i.amount)}`).join("; "));
+    }
+    return lines.join("\n");
+}
+
+/** One-line portfolio summary for later messages so AI always has latest data */
+function buildPortfolioOneLiner(context: { assets: Assets; totalNetWorth: number; financialScore: number } | null): string {
+    if (!context) return "";
+    const { assets, totalNetWorth, financialScore } = context;
+    const fmt = (n: number) => `$${Math.round(n).toLocaleString()}`;
+    return `[Portfolio: Net Worth ${fmt(totalNetWorth)} | Cash ${fmt(assets.cash)} | Equities ${fmt(assets.equities)} | Fixed Income ${fmt(assets.fixedIncome)} | FX ${fmt(assets.fx)} | Insurance ${fmt(assets.insurance)} | Liabilities ${fmt(assets.liabilities)} | Score ${financialScore}/100]`;
+}
 
 export const AIConciergeScreen = () => {
     const navigate = useNavigate();
+    const context = useContext(AppContext);
     const [messages, setMessages] = useState<{role: 'user' | 'model', text: string}[]>([
-        {role: 'model', text: "Hello! I'm your dedicated financial concierge. I can analyze your portfolio, suggest allocations, or answer market questions. How can I assist?"}
+        {role: 'model', text: "Hello! I'm your dedicated financial concierge. I have access to your portfolio data in this app—total net worth, cash, equities, fixed income, FX, insurance, and liabilities—and can give personalized advice. You can ask things like \"What do you suggest based on my current assets?\" or any specific question."}
     ]);
     const [input, setInput] = useState("");
     const [loading, setLoading] = useState(false);
@@ -907,7 +938,7 @@ export const AIConciergeScreen = () => {
         lastApiKeyRef.current = geminiApiKey;
         const ai = new GoogleGenerativeAI(geminiApiKey);
         const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
-        // Gemini 2.5-flash 对 system_instruction 的 Content 格式较严，此处不传；人设改由首条用户消息带入
+        // system_instruction not passed due to Gemini 2.5-flash format; persona sent in first user message
         chatSession.current = model.startChat();
         setApiKeyReady(true);
     }, [import.meta.env.VITE_GEMINI_API_KEY]);
@@ -923,10 +954,12 @@ export const AIConciergeScreen = () => {
         setMessages(prev => [...prev, {role: 'user', text: userText}]);
         setLoading(true);
 
-        // 首条用户消息附带人设（因 gemini-2.5-flash 对 system_instruction 格式限制暂不传）
-        const payload = messages.length <= 1
-            ? `${CONCIERGE_SYSTEM}\n\n---\n\nUser: ${userText}`
-            : userText;
+        const portfolioCtx = context ? { assets: context.assets, totalNetWorth: context.totalNetWorth, assetItems: context.assetItems, financialScore: context.financialScore } : null;
+        const isFirstTurn = messages.length <= 1;
+
+        const payload = isFirstTurn
+            ? `${CONCIERGE_SYSTEM}\n\n[Current Portfolio]\n${buildPortfolioSummary(portfolioCtx)}\n\nUse the above data to give personalized advice.\n\n---\n\nUser: ${userText}`
+            : `${buildPortfolioOneLiner(portfolioCtx)}\n\nUser: ${userText}`;
 
         try {
             const result = await chatSession.current.sendMessage(payload);
@@ -935,7 +968,7 @@ export const AIConciergeScreen = () => {
         } catch (error) {
             console.error("AI Concierge error:", error);
             const errMsg = error instanceof Error ? error.message : "Request failed.";
-            setMessages(prev => [...prev, {role: 'model', text: `抱歉，请求暂时无法处理。${errMsg}`}]);
+            setMessages(prev => [...prev, {role: 'model', text: `Sorry, I couldn't process your request. ${errMsg}`}]);
         } finally {
             setLoading(false);
         }
@@ -1011,7 +1044,7 @@ export const AIConciergeScreen = () => {
                 {/* Input Area */}
                 {!apiKeyReady && (
                     <div className="px-6 pb-4 text-center">
-                        <p className="text-xs text-amber-400/90">未配置 Gemini API Key，无法与 AI 对话。请在项目根目录 <code className="bg-white/10 px-1 rounded">.env</code> 中设置 <code className="bg-white/10 px-1 rounded">VITE_GEMINI_API_KEY</code> 并重启开发服务器。</p>
+                        <p className="text-xs text-amber-400/90">Gemini API Key is not set. Add <code className="bg-white/10 px-1 rounded">VITE_GEMINI_API_KEY</code> to your project root <code className="bg-white/10 px-1 rounded">.env</code> and restart the dev server.</p>
                     </div>
                 )}
                 <div className="p-4 px-6 pb-8 bg-gradient-to-t from-[#050B08] via-[#050B08] to-transparent z-20">
@@ -1024,7 +1057,7 @@ export const AIConciergeScreen = () => {
                                 value={input}
                                 onChange={(e) => setInput(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-                                placeholder={apiKeyReady ? "Ask about markets, analysis..." : "请先配置 VITE_GEMINI_API_KEY"}
+                                placeholder={apiKeyReady ? "Ask about markets, analysis..." : "Set VITE_GEMINI_API_KEY in .env first"}
                                 disabled={!apiKeyReady}
                                 className="flex-1 bg-transparent h-14 pl-6 pr-4 text-white placeholder:text-gray-600 focus:outline-none text-sm font-medium disabled:opacity-60"
                              />
