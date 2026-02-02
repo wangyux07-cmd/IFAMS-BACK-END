@@ -13,7 +13,7 @@ const AssetListScreen = () => {
 
     const { assetItems, assets } = context;
 
-    const filteredItems = assetItems.filter(item => item.assetKey === category);
+    const filteredItems = assetItems.filter(item => item.asset_key === category); // <-- 修改这里
     const totalValue = assets[category] || 0;
 
     const categoryTitles: { [key: string]: string } = {

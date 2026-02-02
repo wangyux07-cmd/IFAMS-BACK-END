@@ -5,10 +5,13 @@ import { AppContext } from '../context/AppContext';
 import { supabase } from '../src/supabaseClient';
 
 const LoginScreen = () => {
+    console.log('LoginScreen: Component rendered.'); // Add render log
     const navigate = useNavigate();
     const context = useContext(AppContext);
-    const { setUsername } = context!;
-
+    // setUsername is no longer needed directly in LoginScreen if AppContext handles profile on auth state change
+    // const { setUsername } = context!; 
+    // To avoid breaking destructuring, we can just get the whole context.
+    
     const [isRegistering, setIsRegistering] = useState(false);
     const [loading, setLoading] = useState(false);
     const [errorMessage, setErrorMessage] = useState('');
@@ -21,31 +24,58 @@ const LoginScreen = () => {
     const handleAuth = async () => {
         setLoading(true);
         setErrorMessage('');
-
+        
         try {
             if (isRegistering) {
-                const { data, error } = await supabase.auth.signUp({ 
-                    email, 
-                    password, 
-                    options: { data: { name } }, 
-                    redirectTo: 'http://localhost:5173/' 
+                const { data, error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: {
+                            username: name // Pass the name as user metadata
+                        }
+                    }
                 });
-                if (error) throw error;
+                if (error) {
+                    throw error;
+                }
                 if (data.user) {
-                    setUsername(data.user.user_metadata.name || data.user.email);
-                    navigate('/dashboard');
+                    // Sign-up successful, user needs to verify email or is already signed in
+                    console.log('LoginScreen: Sign up successful. User:', data.user);
+
+                    // Create a profile entry for the new user
+                    const { error: profileError } = await supabase.from('profiles').insert({
+                        id: data.user.id,
+                        username: name,
+                        // Add any other default profile fields here, e.g., avatar_url
+                    });
+
+                    if (profileError) {
+                        console.error('LoginScreen: Error creating user profile:', JSON.stringify(profileError, null, 2));
+                        setErrorMessage('Error creating user profile. Please try again.');
+                        // Optionally, you might want to rollback the user creation in auth.users here
+                        // Or inform the user to contact support
+                        return; // Prevent navigation if profile creation fails
+                    }
+                    console.log('LoginScreen: User profile created successfully.');
+                    navigate('/dashboard'); // Navigate to dashboard after successful signup and profile creation
                 } else {
-                    setErrorMessage('Registration successful, please check your email to confirm.');
+                    // This case might happen if email confirmation is required and no session is immediately available
+                    setErrorMessage('Please check your email to verify your account.');
                 }
             } else {
-                const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-                if (error) throw error;
-                if (data.user) {
-                    setUsername(data.user.user_metadata.name || data.user.email);
-                    navigate('/dashboard');
+                const { error } = await supabase.auth.signInWithPassword({
+                    email,
+                    password,
+                });
+                if (error) {
+                    throw error;
                 }
+                console.log('LoginScreen: Sign in successful.');
+                navigate('/dashboard'); // Navigate to dashboard after successful sign-in
             }
         } catch (error: any) {
+            console.error('LoginScreen: Authentication error:', error.message);
             setErrorMessage(error.message);
         } finally {
             setLoading(false);

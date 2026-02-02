@@ -176,15 +176,21 @@ const BookkeepingScreen = () => {
                                     <p className="text-[10px] text-gray-500 font-bold tracking-wide flex items-center gap-1.5 mt-1 uppercase">
                                         <span className="truncate max-w-[100px] text-cyan-500/80">{act.category}</span>
                                         <span className="size-0.5 rounded-full bg-gray-600"></span>
-                                        <span>{act.time}</span>
+                                        <span>{new Date(act.time).toLocaleDateString()} - {new Date(act.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
                                     </p>
                                 </div>
                                 
-                                <div className="relative z-10 text-right">
+                                <div className="relative z-10 flex items-center gap-2"> {/* Added flex container for amount and delete button */}
                                     <p className="text-sm font-bold text-white group-hover:drop-shadow-[0_0_8px_rgba(255,255,255,0.3)] transition-all tabular-nums">
                                         -${act.amount}
                                     </p>
-                                    <Icon name="chevron_right" className="text-gray-700 text-xs mt-0.5 group-hover:text-cyan-400 group-hover:translate-x-1 transition-all" />
+                                    <button 
+                                        onClick={(e) => { e.stopPropagation(); deleteActivity(act.id); }} 
+                                        className="size-6 rounded-full bg-white/5 flex items-center justify-center text-gray-700 hover:bg-rose-500 hover:text-white transition-all"
+                                        aria-label="Delete activity"
+                                    >
+                                        <Icon name="delete" className="text-sm" />
+                                    </button>
                                 </div>
                             </div>
                         ))}

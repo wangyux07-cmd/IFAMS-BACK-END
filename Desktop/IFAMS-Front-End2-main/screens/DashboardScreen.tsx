@@ -165,13 +165,19 @@ const DashboardScreen = () => {
                         <div className="flex items-center justify-between border-t border-white/[0.08] pt-5">
                             <div className="group/stat cursor-pointer">
                                 <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-1 group-hover/stat:text-white transition-colors">YTD Return</p>
-                                <p className={`text-base font-bold text-brand-emerald drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]`}>+18.4%</p>
+                                <p className={`text-base font-bold ${growthMetrics.prevNetWorth === 0 && totalNetWorth === 0 ? 'text-gray-400' : 'text-brand-emerald'} drop-shadow-[0_0_5px_rgba(16,185,129,0.3)]`}>
+                                    {growthMetrics.prevNetWorth === 0 && totalNetWorth === 0 ? 'N/A' : '+18.4%'} 
+                                </p>
                             </div>
                             <div className="text-right group/stat cursor-pointer">
                                 <p className="text-[9px] font-bold text-gray-500 uppercase tracking-widest mb-1 group-hover/stat:text-white transition-colors">Next Distribution</p>
                                 <div className="flex items-center justify-end gap-1.5 text-gray-200">
                                     <Icon name="event" className="text-sm text-brand-emerald" />
-                                    <p className="text-sm font-bold">{nextDistDate}</p>
+                                    {totalNetWorth === 0 ? (
+                                        <p className="text-sm font-bold">N/A</p>
+                                    ) : (
+                                        <p className="text-sm font-bold">{nextDistDate}</p>
+                                    )}
                                 </div>
                             </div>
                         </div>

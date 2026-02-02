@@ -2,32 +2,32 @@ import React, { useEffect, useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppShell } from '../components/UI';
 import { supabase } from '../src/supabaseClient';
-import { AppContext } from '../context/AppContext';
+import { AppContext } from '../context/AppContext'; // Import AppContext for context loading state
 
 const ProtectedScreen = () => {
     const navigate = useNavigate();
-    const { setUsername } = useContext(AppContext);
-    const [loading, setLoading] = useState(true);
+    const { loading: contextLoading } = useContext(AppContext)!; // Use context loading state
+    const [authCheckComplete, setAuthCheckComplete] = useState(false);
 
     useEffect(() => {
-        const checkUser = async () => {
-            const { data: { user } } = await supabase.auth.getUser();
+        const checkUserSession = async () => {
+            const { data: { session } } = await supabase.auth.getSession();
 
-            if (user) {
-                setUsername(user.user_metadata.name || user.email);
+            if (session?.user) {
+                // User is logged in, navigate to dashboard
                 navigate('/dashboard');
             } else {
-                navigate('/'); // Redirect to login if no user
+                // No user session, navigate to login
+                navigate('/');
             }
-            setLoading(false);
+            setAuthCheckComplete(true);
         };
 
-        checkUser();
+        checkUserSession();
 
-        // Listen for auth state changes
+        // Listen for auth state changes to handle redirects
         const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
             if (session?.user) {
-                setUsername(session.user.user_metadata.name || session.user.email);
                 navigate('/dashboard');
             } else if (event === 'SIGNED_OUT') {
                 navigate('/');
@@ -37,9 +37,10 @@ const ProtectedScreen = () => {
         return () => {
             authListener.subscription.unsubscribe();
         };
-    }, [navigate, setUsername]);
+    }, [navigate]); // No dependency on setUsername as AppContext handles it
 
-    if (loading) {
+    // Display loading only if both context is loading OR auth check isn't complete
+    if (contextLoading || !authCheckComplete) {
         return (
             <AppShell>
                 <div className="flex items-center justify-center min-h-screen text-white text-lg">
@@ -53,3 +54,4 @@ const ProtectedScreen = () => {
 };
 
 export default ProtectedScreen;
+

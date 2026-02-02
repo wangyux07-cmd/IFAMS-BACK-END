@@ -5,7 +5,7 @@ export interface Activity {
     time: string;
     amount: string;
     icon: string;
-    sourceAssetId?: number; // Optional linkage to an asset
+    source_asset_id?: number; // Optional linkage to an asset
 }
 
 export interface Assets {
@@ -19,7 +19,7 @@ export interface Assets {
 
 export interface AssetItem {
     id: number;
-    assetKey: keyof Assets;
+    asset_key: keyof Assets; // Changed from assetKey to asset_key
     name: string;
     institution: string;
     amount: number;
@@ -46,7 +46,7 @@ export interface AppContextType {
     assets: Assets;
     assetItems: AssetItem[];
     addAssetItem: (item: AssetItem) => void;
-    updateAsset: (key: keyof Assets, value: number) => void;
+    updateAsset: (item: AssetItem) => void;
     totalNetWorth: number;
     growthMetrics: GrowthMetrics;
     financialScore: number;

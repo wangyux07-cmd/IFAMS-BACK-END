@@ -7,7 +7,17 @@ const OverviewScreen = () => {
     const navigate = useNavigate();
     const context = useContext(AppContext);
     if (!context) return null;
-    const { assets, totalNetWorth } = context;
+    const { assets, totalNetWorth, loading, assetItems } = context;
+
+    if (loading) {
+        return (
+            <AppShell>
+                <div className="flex items-center justify-center h-full text-white text-lg">
+                    Loading Overview Data...
+                </div>
+            </AppShell>
+        );
+    }
 
     const [selectedCategory, setSelectedCategory] = useState('Total Net Worth');
     const [timeframe, setTimeframe] = useState('1m');
@@ -28,6 +38,14 @@ const OverviewScreen = () => {
         if (selectedCategory === 'Total Net Worth') return `$${totalNetWorth.toLocaleString()}`;
         const found = categories.find(c => c.label === selectedCategory);
         return found ? found.val : `$${totalNetWorth.toLocaleString()}`;
+    }, [selectedCategory, totalNetWorth, categories]);
+
+    const hasChartData = useMemo(() => {
+        if (selectedCategory === 'Total Net Worth') {
+            return totalNetWorth > 0;
+        }
+        const found = categories.find(c => c.label === selectedCategory);
+        return found ? found.raw > 0 : false;
     }, [selectedCategory, totalNetWorth, categories]);
 
     // Smoother, more premium looking chart path generation
@@ -103,75 +121,55 @@ const OverviewScreen = () => {
                         </div>
 
                         {/* Chart Area */}
-                        <div className="h-40 w-full relative">
-                             <svg className="w-full h-full overflow-visible" viewBox="0 0 400 120" preserveAspectRatio="none">
-                                <defs>
-                                    <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-                                        <stop offset="0%" stopColor="#10B981" stopOpacity="0.2"/>
-                                        <stop offset="100%" stopColor="#10B981" stopOpacity="0"/>
-                                    </linearGradient>
-                                </defs>
-                                <path 
-                                    d={generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} 
-                                    fill="none" 
-                                    stroke="#10B981" 
-                                    strokeWidth="3" 
-                                    strokeLinecap="round" 
-                                    strokeLinejoin="round"
-                                    className="transition-all duration-700 ease-in-out"
-                                />
-                                <path 
-                                    d={`${generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} L 400,150 L 0,150 Z`} 
-                                    fill="url(#chartGradient)" 
-                                    className="transition-all duration-700 ease-in-out opacity-80"
-                                />
-                             </svg>
-                        </div>
-                     </div>
-                </div>
-
-                {/* Categories Grid */}
-                <div>
-                    <div className="flex items-center gap-2 mb-4 px-1">
-                        <Icon name="pie_chart" className="text-brand-emerald text-sm" />
-                        <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest">Asset Composition</h3>
-                    </div>
-                    
-                    <div className="grid grid-cols-2 gap-3">
-                        {categories.map((cat) => (
-                            <div 
-                                key={cat.id} 
-                                onClick={() => {
-                                    setSelectedCategory(cat.label);
-                                    navigate(`/asset-detail/${cat.id}`);
-                                }} 
-                                className="group relative overflow-hidden rounded-[20px] bg-card-dark p-4 border border-white/5 transition-all active:scale-[0.98] cursor-pointer shadow-lg"
-                            >
-                                {/* Subtle Gradient overlay on hover */}
-                                <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 bg-gradient-to-br from-white/[0.03] to-transparent`}></div>
-                                
-                                <div className="relative z-10 flex flex-col h-full justify-between gap-5">
-                                    <div className="flex justify-between items-start">
-                                         <div className={`size-10 rounded-[14px] flex items-center justify-center bg-white/5 border border-white/5 ${cat.color} group-hover:scale-110 transition-transform duration-300`}>
-                                            <Icon name={cat.icon} className="text-xl" />
-                                         </div>
-                                         <div className="size-6 rounded-full bg-white/5 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity -mr-1 -mt-1">
-                                             <Icon name="arrow_forward" className="text-gray-400 text-[10px]" />
-                                         </div>
-                                    </div>
-                                    <div>
-                                        <p className="text-white font-bold text-lg leading-none tracking-tight mb-1">{cat.val}</p>
-                                        <div className="flex items-center gap-1.5">
-                                            <div className={`size-1.5 rounded-full ${cat.bg}`}></div>
-                                            <p className="text-[9px] font-bold text-gray-500 uppercase tracking-wider">{cat.label}</p>
-                                        </div>
-                                    </div>
-                                </div>
+                        {hasChartData ? (
+                            <div className="h-48 w-full relative">
+                                 <svg className="w-full h-full overflow-visible" viewBox="0 0 400 160" preserveAspectRatio="none">
+                                    <defs>
+                                        <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor="#10B981" stopOpacity="0.2"/>
+                                            <stop offset="100%" stopColor="#10B981" stopOpacity="0"/>
+                                        </linearGradient>
+                                    </defs>
+                                    <path 
+                                        d={generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} 
+                                        fill="none" 
+                                        stroke="#10B981" 
+                                        strokeWidth="3" 
+                                        strokeLinecap="round" 
+                                        strokeLinejoin="round"
+                                        className="transition-all duration-700 ease-in-out"
+                                    />
+                                    <path 
+                                        d={`${generateMockPath(selectedCategory, timeframe, categories.find(c => c.label === selectedCategory)?.raw)} L 400,150 L 0,150 Z`} 
+                                        fill="url(#chartGradient)" 
+                                        className="transition-all duration-700 ease-in-out opacity-80"
+                                    />
+                                 </svg>
                             </div>
-                        ))}
+                        ) : (
+                            <div className="h-40 w-full relative flex items-center justify-center text-gray-500 text-sm">
+                                No data available for this category.
+                            </div>
+                        )}
                     </div>
                 </div>
 
+                {/* Asset Categories Grid */}
+                <div className="grid grid-cols-2 gap-4">
+                    {categories.map(category => (
+                        <div 
+                            key={category.id} 
+                            onClick={() => navigate(`/asset-detail/${category.id}`)} // 点击导航
+                            className="flex flex-col items-start p-5 rounded-[24px] bg-gradient-to-b from-[#15231D] to-[#0D1A14] border border-white/5 shadow-2xl cursor-pointer hover:border-brand-emerald/50 transition-all duration-300 active:scale-95"
+                        >
+                            <div className={`size-10 rounded-full flex items-center justify-center mb-3 ${category.bg}/20 border border-white/10`}>
+                                <Icon name={category.icon} className={`${category.color} text-xl`} />
+                            </div>
+                            <p className="text-gray-400 text-sm font-medium">{category.label}</p>
+                            <p className="text-white text-lg font-bold">{category.val}</p>
+                        </div>
+                    ))}
+                </div>
             </div>
         </AppShell>
     );

@@ -2,6 +2,7 @@ import React, { useContext, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { AppContext } from '../context/AppContext';
 import { AppShell, Icon } from '../components/UI';
+import { supabase } from '../src/supabaseClient'; // Import supabase
 
 const ProfileScreen = () => {
     const navigate = useNavigate();
@@ -139,7 +140,16 @@ const ProfileScreen = () => {
 
                 {/* 5. Sign Out - Distinct Button below menu */}
                 <button 
-                    onClick={() => navigate('/')} 
+                    onClick={async () => {
+                        console.log('Sign Out: Attempting to sign out...');
+                        const { error } = await supabase.auth.signOut();
+                        if (error) {
+                            console.error('Sign Out: Error during sign out:', error);
+                        } else {
+                            console.log('Sign Out: Successfully signed out.');
+                        }
+                        navigate('/'); 
+                    }} 
                     className="mt-8 w-full h-14 flex items-center justify-center gap-2 rounded-2xl border border-rose-500/10 bg-rose-500/[0.03] text-rose-500/70 font-bold uppercase tracking-widest text-xs hover:bg-rose-500/10 hover:text-rose-400 hover:border-rose-500/30 hover:shadow-[0_0_20px_rgba(244,63,94,0.1)] active:scale-[0.98] transition-all duration-300 group"
                 >
                     <Icon name="logout" className="text-base group-hover:-translate-x-1 transition-transform" />

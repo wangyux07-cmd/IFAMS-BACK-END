@@ -165,29 +165,28 @@ export const SimpleForm = ({ title, assetKey }: { title: string; assetKey?: keyo
     const EXCHANGE_RATES: Record<string, number> = { 'USD': 1, 'EUR': 1.09, 'GBP': 1.27, 'HKD': 0.128, 'CNY': 0.138, 'JPY': 0.0068 };
 
     useEffect(() => {
-        if (isEquities) {
-            const price = parseFloat(sharePrice) || 0;
-            const qty = parseFloat(shareQuantity) || 0;
-            if (price > 0 && qty > 0) setAmount((price * qty).toFixed(2));
-        }
-    }, [sharePrice, shareQuantity, isEquities]);
-
-    useEffect(() => {
         if (isFX && currency === 'USD') setCurrency('EUR');
     }, [isFX]);
 
-    const handleAdd = () => {
+    const handleAdd = async () => { // Marked as async
         const numAmount = parseFloat(amount) || 0;
+        console.log('--- SimpleForm handleAdd ---');
+        console.log('isExpense:', isExpense);
+        console.log('amount (parsed):', numAmount);
+        
         if (isExpense) {
-            addActivity({
-                id: Date.now(),
+            const newActivity = {
                 title: name || "Expense",
                 category: expenseCategory,
-                time: new Date().toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}),
-                amount: amount,
+                amount: amount, // Keep as string for Activity type
                 icon: getCategoryIcon(expenseCategory),
-                sourceAssetId: sourceAssetId ? parseInt(sourceAssetId) : undefined
-            }, sourceAssetId ? parseInt(sourceAssetId) : undefined, currency);
+                source_asset_id: sourceAssetId ? parseInt(sourceAssetId) : undefined, // <-- 修改为 source_asset_id
+                currency: currency,
+            };
+            console.log('Prepared Activity:', newActivity);
+            // 这里的第二个参数现在应该从 newActivity 中获取，因为它已经有了 source_asset_id
+            await addActivity(newActivity, newActivity.source_asset_id, currency); 
+            console.log('addActivity called and awaited');
             navigate('/bookkeeping');
             return;
         }
@@ -244,17 +243,19 @@ export const SimpleForm = ({ title, assetKey }: { title: string; assetKey?: keyo
             if (maturityDate) attributes['Payoff Date'] = maturityDate;
         }
 
-        addAssetItem({
-            id: Date.now(),
-            assetKey: assetKey!,
+        const newAssetItem = {
+            asset_key: assetKey!, // <-- 修改为 asset_key
             name: name || "New Entry",
             institution: institution || "General",
-            amount: numAmount,
+            amount: numAmount, // amount is number in AssetItem for calculation
             currency: currency,
             date: date,
             remarks: remarks,
             attributes: attributes
-        });
+        };
+        console.log('Prepared AssetItem:', newAssetItem);
+        await addAssetItem(newAssetItem); // Added await
+        console.log('addAssetItem called and awaited');
         navigate(`/asset-detail/${assetKey}`);
     };
 
@@ -291,7 +292,7 @@ export const SimpleForm = ({ title, assetKey }: { title: string; assetKey?: keyo
     };
 
     const theme = getTheme();
-    const paySources = assetItems.filter(i => ['cash', 'liabilities'].includes(i.assetKey));
+    const paySources = assetItems.filter(i => ['cash', 'liabilities'].includes(i.asset_key));
 
     return (
         <AppShell hideNav>
@@ -317,20 +318,17 @@ export const SimpleForm = ({ title, assetKey }: { title: string; assetKey?: keyo
                     </div>
                     <div className="w-full relative flex justify-center items-baseline gap-2">
                          <span className={`text-4xl font-light text-gray-600 select-none animate-fade-in`}>$</span>
-                        {isEquities ? (
-                             <div className="text-[64px] font-medium text-white tracking-tighter leading-none animate-fade-in">
-                                 {amount ? parseFloat(amount).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : "0.00"}
-                             </div>
-                        ) : (
-                            <input className={`w-full bg-transparent text-[64px] font-medium text-white text-center leading-none tracking-tighter placeholder:text-white/10 focus:outline-none ${theme.caret} p-0 border-none focus:ring-0 max-w-[80%]`} placeholder="0" type="number" value={amount} onChange={e => setAmount(e.target.value)} autoFocus={!isEquities} />
-                        )}
+                        {/* 无论是否是Equities，都显示一个可输入的input */}
+                        <input className={`w-full bg-transparent text-[64px] font-medium text-white text-center leading-none tracking-tighter placeholder:text-white/10 focus:outline-none ${theme.caret} p-0 border-none focus:ring-0 max-w-[80%]`} placeholder="0" type="number" value={amount} onChange={e => setAmount(e.target.value)} autoFocus={!isEquities || isExpense} />
                     </div>
-                    {isEquities && (
+                    {/* 移除 Equities 时的 Calculated Market Value 提示，因为它现在是直接输入的 */}
+                    {/* {isEquities && (
                          <div className="flex items-center gap-1.5 mt-3 opacity-60">
                              <Icon name="calculate" className="text-xs text-brand-emerald" />
                              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Calculated Market Value</p>
                          </div>
-                    )}
+                    )} */}
+
                 </div>
                 <div className="flex-1 bg-card-dark/80 backdrop-blur-xl rounded-t-[40px] border-t border-white/5 p-8 space-y-8 shadow-[0_-20px_60px_rgba(0,0,0,0.8)] animate-fade-in overflow-y-auto hide-scrollbar pb-32">
                     {isExpense ? (
@@ -873,16 +871,28 @@ export const AIConciergeScreen = () => {
     const chatSession = useRef<Chat | null>(null);
 
     useEffect(() => {
-        if (!chatSession.current) {
-            const ai = new GoogleGenerativeAI({ apiKey: process.env.API_KEY });
-            const model = ai.getGenerativeModel({ model: 'gemini-2.5-flash' });
+        console.log("Vite环境变量:", import.meta.env); // 打印 import.meta.env 的完整内容
+        const geminiApiKey = import.meta.env.VITE_GEMINI_API_KEY; // 确保在 useEffect 内部获取最新值
+
+        // 添加条件：如果 chatSession 未初始化，或 geminiApiKey 改变，则重新初始化
+        if (!chatSession.current || chatSession.current.apiKey !== geminiApiKey) { 
+            if (!geminiApiKey) {
+                console.error("Gemini API Key is not set. Please add VITE_GEMINI_API_KEY to your .env file.");
+                alert("错误：Gemini API Key 未设置。请检查您的 .env.local 文件并确保已重启开发服务器。"); // 添加 alert 提示
+                return;
+            }
+            console.log("初始化GoogleGenerativeAI时的Key:", geminiApiKey); 
+            const ai = new GoogleGenerativeAI({ apiKey: geminiApiKey });
+            const model = ai.getGenerativeModel({ model: 'gemini-3-flash-preview' });
             chatSession.current = model.startChat({
                 config: {
                     systemInstruction: "You are a sophisticated AI financial concierge for an exclusive wealth management app. You have access to general financial knowledge. Be concise, professional, and helpful.",
                 },
             });
+            // 将新的 API Key 存储到 chatSession.current 中，以便下次检查
+            chatSession.current.apiKey = geminiApiKey;
         }
-    }, []);
+    }, [import.meta.env.VITE_GEMINI_API_KEY]); // <-- 修改依赖项为 VITE_GEMINI_API_KEY
 
     useEffect(() => {
         bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -896,7 +906,7 @@ export const AIConciergeScreen = () => {
         setLoading(true);
 
         try {
-            const result = await chatSession.current.sendMessage({ message: userText });
+            const result = await chatSession.current.sendMessage(userText);
             const responseText = result.text || "I'm sorry, I couldn't generate a response.";
             setMessages(prev => [...prev, {role: 'model', text: responseText}]);
         } catch (error) {
